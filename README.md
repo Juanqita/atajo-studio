@@ -7,8 +7,8 @@ service, product photography and virtual try-on for small fashion retailers.
 The project has two parts:
 
 1. **Main website**: presents the studio, its three services, the process, FAQ and a
-   demo request form. It includes a **virtual try-on demo**: the garment worn in a
-   photo next to a 3D version of the same garment that visitors can rotate.
+   demo request form. It includes a **virtual try-on demo**: the garment worn on a
+   neutral mannequin next to a 3D version of the same garment that visitors can rotate.
 2. **Lead radar**: currently an internal Excel file that will evolve into an
    interactive web app for sales.
 
@@ -30,8 +30,8 @@ Not deployed yet; deployment is on the roadmap.
 ### Website
 - Hero, "what we solve" section, three services (WhatsApp, photos, try-on), process,
   FAQ and contact.
-- **Virtual try-on demo**: a photo of the garment being worn side by side with a
-  procedural 3D garment (Three.js) that the visitor drags to rotate. No camera is used
+- **Virtual try-on demo**: an illustration of the garment on a featureless mannequin,
+  side by side with a procedural 3D garment (Three.js) that the visitor drags to rotate. No camera is used
   and no visitor images or data are collected.
 - Demo request form with client-side validation (no backend yet).
 
@@ -53,7 +53,8 @@ Not deployed yet; deployment is on the roadmap.
 ```
 .
 ├── web/
-│   └── index.html                # website + 3D try-on demo (single file for now)
+│   ├── index.html                # website + 3D try-on demo (single file for now)
+│   └── mannequin.svg             # try-on demo illustration
 ├── scripts/
 │   └── generate_sample_data.py   # synthetic data generator for the lead radar
 ├── sample_data/                  # fake data for development and demos
