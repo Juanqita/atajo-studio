@@ -16,7 +16,8 @@ This is the planned work. Total estimate: **60–80 h**.
 ## 1. Live virtual try-on – full system (~25 h) ⭐ priority
 - [ ] Replace the procedural garment with real 3D garment models (GLB/GLTF)
 - [ ] Two-column layout: full head-to-toe outfit + zoomed-in garment view, kept in sync
-- [ ] Neutral human figure (featureless mannequin) instead of a real person's photo
+- [x] Neutral mannequin in the try-on demo image (no real person)
+- [ ] Neutral 3D mannequin as the base of the live outfit view
 - [ ] Garment and outfit selector (top, bottom, footwear, accessories) with prices
 - [ ] Smooth 360° rotation with mouse and touch, zoom and view presets (front, back, side)
 - [ ] Studio lighting, PBR fabric materials, soft shadows and HDRI environment
@@ -29,7 +30,7 @@ This is the planned work. Total estimate: **60–80 h**.
 - [ ] Refined design system: typography, color, spacing and components
 - [ ] Rework sections: services, use cases, process, FAQ, contact
 - [ ] Fully responsive and accessible (WCAG AA)
-- [ ] Performance: Lighthouse > 90, move embedded base64 images to optimized files
+- [ ] Performance: Lighthouse > 90, optimized images
 - [ ] Technical SEO: metadata, Open Graph, sitemap
 - [ ] Working demo request form (backend or form service) with spam protection
 - [ ] Privacy-friendly basic analytics
