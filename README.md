@@ -12,7 +12,7 @@ The project has two parts:
 2. **Lead radar**: currently an internal Excel file that will evolve into an
    interactive web app for sales.
 
-> **Status:** early working demo (a single HTML file). Most of the work is still ahead:
+> **Status:** early working demo (static HTML, CSS and JS). Most of the work is still ahead:
 > finishing the site, building a full live try-on system and taking the overall
 > design to a professional level. See [ROADMAP.md](ROADMAP.md).
 >
@@ -41,7 +41,7 @@ Not deployed yet; deployment is on the roadmap.
 
 ## Tech stack
 
-- **Current:** one self-contained HTML file with inline CSS and JavaScript.
+- **Current:** static HTML with separate CSS (`web/css`) and JavaScript (`web/js`).
 - **3D:** Three.js r128 (CDN), procedural garment geometry, drag-to-rotate.
 - **Fonts:** Google Fonts (Grenze, Unbounded, Figtree, JetBrains Mono).
 - **Lead radar:** Excel → (next) Python + FastAPI + web frontend.
@@ -53,7 +53,9 @@ Not deployed yet; deployment is on the roadmap.
 ```
 .
 ├── web/
-│   ├── index.html                # website + 3D try-on demo (single file for now)
+│   ├── index.html                # website markup + 3D try-on demo
+│   ├── css/styles.css            # site styles
+│   ├── js/main.js                # 3D viewer and form logic
 │   └── mannequin.svg             # try-on demo illustration
 ├── scripts/
 │   └── generate_sample_data.py   # synthetic data generator for the lead radar
