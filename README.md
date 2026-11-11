@@ -13,7 +13,7 @@ The project has two parts:
    interactive web app for sales.
 
 > **Status:** early working demo (static HTML, CSS and JS). Most of the work is still ahead:
-> finishing the site, building a full live try-on system and taking the overall
+> finishing the site, building a full interactive 3D try-on and taking the overall
 > design to a professional level. See [ROADMAP.md](ROADMAP.md).
 >
 > **Data:** the lead radar only uses publicly available **company-level** information
@@ -22,8 +22,7 @@ The project has two parts:
 
 ## Privacy
 
-- The try-on never stores, uploads or logs images of the people using it. The planned
-  live camera mode processes frames in the browser, in memory only.
+- The try-on does not use the camera and never collects images of the people using it.
 - The project keeps no personal or customer data. Garments are read at runtime from
   the store's own catalog through read-only connectors.
 - This repository contains synthetic or illustrative data only.
