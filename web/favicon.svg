@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Atajo Studio</title>
+  <rect width="64" height="64" rx="14" fill="#0E2A33"/>
+  <path d="M14 50 Q14 14 50 14" fill="none" stroke="#6FA3B1" stroke-width="3" stroke-linecap="round" stroke-dasharray="0.1 7"/>
+  <path d="M15 49 L47 17" stroke="#F08A12" stroke-width="6" stroke-linecap="round"/>
+  <path d="M33 16 H48 V31" fill="none" stroke="#F08A12" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M19 37 Q20 43 26 44 Q20 45 19 51 Q18 45 12 44 Q18 43 19 37 Z" fill="#F3EEE4"/>
+</svg>
