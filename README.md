@@ -20,6 +20,14 @@ The project has two parts:
 > from Colombian government open-data portals. It does not store data about
 > individuals. This repository contains **synthetic data only** (`sample_data/`).
 
+## Privacy
+
+- The try-on never stores, uploads or logs images of the people using it. The planned
+  live camera mode processes frames in the browser, in memory only.
+- The project keeps no personal or customer data. Garments are read at runtime from
+  the store's own catalog through read-only connectors.
+- This repository contains synthetic or illustrative data only.
+
 ## Demo
 
 Not deployed yet; deployment is on the roadmap.

@@ -1,7 +1,12 @@
 # Roadmap
 
-The project is an early demo: a single HTML file with a basic 3D try-on.
-This is the planned work. Total estimate: **60–80 h**.
+The project is an early demo: a static site with a basic 3D try-on.
+This is the planned work. Total estimate: **100–130 h**.
+
+**Privacy rules for every phase:** the try-on never stores, uploads or logs images of
+the people using it, and the project never keeps personal or customer data. Garment
+data is read at runtime from the store's own catalog; the repository only contains
+synthetic or illustrative data.
 
 ## 0. Technical assessment & stack migration (~8–12 h)
 - [ ] Audit the current site: structure, performance, accessibility, maintainability
@@ -49,3 +54,24 @@ This is the planned work. Total estimate: **60–80 h**.
 - [ ] Basic tests for key components and the API
 - [ ] CI with GitHub Actions
 - [ ] Continuous deployment of the website
+
+## 5. Live camera try-on – privacy by design (~25–30 h)
+Customers see a garment on themselves through their own camera, in real time.
+- [ ] Architecture decision record: on-device processing only (`docs/adr/0002-live-try-on-privacy.md`)
+- [ ] Camera access with explicit opt-in and a visible "camera on" indicator; stops when the tab is hidden
+- [ ] Frames are processed in memory, in the browser (WebGL/WebGPU); no frame is ever sent to a server
+- [ ] No storage of any kind: no uploads, no canvas exports, no local storage, no analytics on frames
+- [ ] Body/pose landmarks with a pretrained, client-side library (e.g. MediaPipe); no model training in this project
+- [ ] Garment overlay anchored to shoulders and hips; scale and rotation follow the pose
+- [ ] Graceful fallback to the 3D mannequin view when the camera is denied or unavailable
+- [ ] Automated test that fails if the try-on code calls any network or storage API with image data
+- [ ] Privacy notice in the UI and in the data policy page
+
+## 6. Catalog connectors (~10–15 h)
+Garments come from the store's existing system; nothing is copied into this project.
+- [ ] Connector interface: list products, garment images, sizes, colors and prices
+- [ ] Adapters for common store backends (e.g. Shopify, WooCommerce) through their official APIs
+- [ ] Mock connector with synthetic garments for development and tests
+- [ ] Credentials only through environment variables (`.env`, never committed)
+- [ ] Read-only access; no customer, order or business records are requested or stored
+- [ ] Caching limited to public product data, with expiry
