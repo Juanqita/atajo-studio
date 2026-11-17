@@ -29,8 +29,7 @@ The project has two parts:
 
 ## Demo
 
-Not deployed yet; deployment is on the roadmap.
-<!-- TODO: add the live URL and 1–2 screenshots once deployed -->
+Live demo: **https://atajo-studio.netlify.app** (deployed from `main` with Netlify).
 
 ## Features (current demo)
 

@@ -16,7 +16,7 @@ synthetic or illustrative data.
 - [ ] Document the decision (`docs/adr/0001-stack.md`)
 - [ ] Migrate the site to the chosen stack without losing functionality
 - [ ] Upgrade Three.js from r128 to a current release
-- [ ] First public deployment (Netlify / Vercel)
+- [x] First public deployment (Netlify)
 
 ## 1. Interactive 3D virtual try-on – full system (~25 h) ⭐ priority
 - [ ] Replace the procedural garment with real 3D garment models (GLB/GLTF)
