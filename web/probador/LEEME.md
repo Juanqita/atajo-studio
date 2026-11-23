@@ -30,6 +30,14 @@ python3 -m http.server 8000   # luego http://localhost:8000
 
 En producción se publica como sitio estático (Netlify).
 
+## Cómo probar el realismo de la prenda (Módulo A)
+
+1. Crea una tienda en `#/registro` y entra a **Prendas → Subir una prenda**.
+2. Sube la foto de una camisa extendida sobre un fondo liso (sirve también la foto de catálogo con fondo blanco).
+3. En **Puntos**, revisa hombros, ruedo, axilas, codos y puños, y mira la vista previa con brazos abajo y brazos en movimiento.
+4. Guarda y abre el probador (`#/t/<tu-tienda>`) en el celular. Enciende la cámara, párate en la silueta y mueve los brazos: las mangas deben doblarse en el codo, la mano debe verse encima de la camisa al cruzarla y el ruedo debe mecerse al girar.
+5. Arriba a la derecha se ven los cuadros por segundo. La meta es 20 o más; si dice "modo liviano", el equipo bajó de 15 y se apagaron las manos por delante y la sombra.
+
 ## Estructura
 
 - `index.html`, `css/app.css`
