@@ -9,6 +9,10 @@ import { fullAnchors } from "./garment.js";
 const app = document.getElementById("app");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const $ = (s, r = app) => r.querySelector(s);
+// Modo sin conexión (tótem de vitrina): guarda la app y el modelo de visión en el equipo
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(e => console.warn("Sin modo sin conexión:", e)));
+}
 const $$ = (s, r = app) => [...r.querySelectorAll(s)];
 let cleanup = null;
 

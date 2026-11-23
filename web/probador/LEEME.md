@@ -49,6 +49,7 @@ En producción se publica como sitio estático (Netlify).
 - `js/filters.js`: filtro One Euro para los puntos de MediaPipe y resorte amortiguado; rigidez por tipo de prenda
 - `js/ambient.js`: luz del ambiente sobre la prenda y manos por delante de la camisa (tono de piel de la cara)
 - `js/capture.js`: revisión de calidad, recorte de fondo, puntos sugeridos (incluye mangas)
+- `sw.js`: modo sin conexión (app con red primero; modelo y motor desde la caché). Si se cambia el modelo o el wasm, sube `HEAVY` de versión
 - `widget.js`: botón "Pruébatelo" para cualquier web
 - `lib/`, `wasm/`, `models/`: MediaPipe vendorizado (funciona sin CDN)
 - `vendor/qrcode.js`: generador de QR (MIT, Kazuhiko Arase)

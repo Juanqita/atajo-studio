@@ -71,7 +71,16 @@ export function prepareGarment(img, anchors0) {
     const wE = Math.min(rootW * 1.2, mw(e, norm(add(d1, d2)))), wC = Math.min(rootW * 1.1, mw(c, d2));
     return { side, piece, s, a, root, e, c, rootW, wE, wC, len: len(sub(e, root)) + len(sub(c, e)), torsoH };
   });
-  const out = { img, w, h, A, pid, sleeves, key, ver: (cached?.ver || 0) + 1 };
+  // Textura de piezas en dos canales: R = pieza exacta (torso), G = mangas extendidas unos píxeles bajo el
+  // torso, para que el borde del torso se funda suave sobre la manga en vez de dejar una línea recta.
+  const D = Math.max(3, Math.round(w * .03)), pid2 = new Uint8Array(w * h * 2);
+  for (let i = 0; i < w * h; i++) { pid2[i * 2] = pid[i]; pid2[i * 2 + 1] = pid[i] === PIECE.torso ? 0 : pid[i]; }
+  if (hasSleeves) for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 1; x < w; x++) if (pid[row + x] === PIECE.torso && pid[row + x - 1] === PIECE.left) { for (let k = 0; k < D && x + k < w && pid[row + x + k] === PIECE.torso; k++) pid2[(row + x + k) * 2 + 1] = PIECE.left; break; }
+    for (let x = w - 2; x >= 0; x--) if (pid[row + x] === PIECE.torso && pid[row + x + 1] === PIECE.right) { for (let k = 0; k < D && x - k >= 0 && pid[row + x - k] === PIECE.torso; k++) pid2[(row + x - k) * 2 + 1] = PIECE.right; break; }
+  }
+  const out = { img, w, h, A, pid, pid2, D, sleeves, key, ver: (cached?.ver || 0) + 1 };
   prepCache.set(img, out);
   return out;
 }
@@ -209,7 +218,7 @@ export class PhotoRig {
     } else { srcPts = [S.root, S.e, S.c]; dstPts = [Droot, E, W]; }
     const widths = [S.rootW, S.wE, S.wC].map(v => v * 1.08);
     const rows = [];
-    const build = (pts, edgeA, edgeB, wk, sideRef) => {
+    const build = (pts, edgeA, edgeB, wk, sideRef, backK = 1) => {
       const out = [], n = nUp + nFore;
       const d1 = norm(sub(pts[1], pts[0])), d2 = norm(sub(pts[2], pts[1]));
       const L1 = len(sub(pts[1], pts[0])), L2 = len(sub(pts[2], pts[1]));
@@ -233,7 +242,10 @@ export class PhotoRig {
         const hw = wid * wk / 2;
         let e1 = add(c, mul(n2, hw)), e2 = add(c, mul(n2, -hw));
         // cerca de la raíz, la sección se alinea con la costura hombro-axila
-        if (up) { const bl = 1 - smooth(f * 2.5); const ext = .12; const ra = add(edgeA, mul(sub(edgeA, edgeB), ext)), rb = add(edgeB, mul(sub(edgeB, edgeA), ext));
+        if (up) { const bl = 1 - smooth(f * 2.5); const ext = .12;
+          // la raíz entra un poco bajo el torso (lo que cubre la manga extendida de pid2)
+          const back = r === 0 ? mul(d1, -this.prep.D * 1.1 * wk * backK) : { x: 0, y: 0 };
+          const ra = add(add(edgeA, mul(sub(edgeA, edgeB), ext)), back), rb = add(add(edgeB, mul(sub(edgeB, edgeA), ext)), back);
           e1 = lerp(e1, ra, bl); e2 = lerp(e2, rb, bl); }
         out.push([e1, c, e2]);
       }
@@ -252,7 +264,7 @@ export class PhotoRig {
       Es = lerp(Ds, add(c0, mul(nn, hw0)), wRaise); Ea = lerp(Da, add(c0, mul(nn, -hw0)), wRaise);
       dstPts = [lerp(Es, Ea, .5), ...dstPts.slice(1)];
     }
-    const dst = build(dstPts, Es, Ea, k, Es);
+    const dst = build(dstPts, Es, Ea, k, Es, 1 - wRaise);
     // Las filas de la raíz se extienden un poco hacia el torso para que no quede costura abierta
     const pos = [], uv = [], shade = [];
     for (let r = 0; r < src.length; r++) for (let i = 0; i < 3; i++) { pos.push(dst[r][i]); uv.push(src[r][i]); shade.push(i === 1 ? 1 : .8); }
@@ -307,17 +319,23 @@ in vec2 vUv; in float vShade;
 uniform sampler2D uImg; uniform sampler2D uPid; uniform float uPiece; uniform vec3 uTint; uniform float uEdge; uniform vec2 uR;
 uniform int uMode; uniform float uShadow;
 out vec4 o;
-float m(vec2 uv){ return step(abs(texture(uPid, uv).r * 255.0 - uPiece), 0.5); }
+float m(vec2 uv){ vec2 p = texture(uPid, uv).rg * 255.0; float v = uPiece < 1.5 ? p.r : p.g; return step(abs(v - uPiece), 0.5); }
 void main(){
   float k = m(vUv);
   if (uMode == 1) { float a = texture(uImg, vUv, 3.5).a * k; o = vec4(0, 0, 0, a * uShadow); return; }
   vec4 c = texture(uImg, vUv); float a = c.a * k; if (a < 0.003) discard;
+  // sombra solo en el borde real de la tela (transparencia), no en la unión entre piezas
   float n = 0.0;
-  n += texture(uImg, vUv + vec2(uR.x, 0)).a * m(vUv + vec2(uR.x, 0));
-  n += texture(uImg, vUv - vec2(uR.x, 0)).a * m(vUv - vec2(uR.x, 0));
-  n += texture(uImg, vUv + vec2(0, uR.y)).a * m(vUv + vec2(0, uR.y));
-  n += texture(uImg, vUv - vec2(0, uR.y)).a * m(vUv - vec2(0, uR.y));
+  n += texture(uImg, vUv + vec2(uR.x, 0)).a;
+  n += texture(uImg, vUv - vec2(uR.x, 0)).a;
+  n += texture(uImg, vUv + vec2(0, uR.y)).a;
+  n += texture(uImg, vUv - vec2(0, uR.y)).a;
   n *= 0.25;
+  if (uPiece < 1.5) { // el torso se desvanece al llegar a la costura con la manga
+    vec2 q = uR * 1.6;
+    float sft = (m(vUv + vec2(q.x, 0)) + m(vUv - vec2(q.x, 0)) + m(vUv + vec2(0, q.y)) + m(vUv - vec2(0, q.y))) * 0.25;
+    a *= mix(0.2, 1.0, sft);
+  }
   float edge = mix(1.0, 0.78 + 0.22 * n, uEdge);
   vec3 rgb = c.rgb / max(c.a, 1e-4) * uTint * vShade * edge;
   o = vec4(rgb * a, a);
@@ -359,7 +377,7 @@ class GLRenderer {
     if (t.ver !== prep.ver || t.prep !== prep) {
       gl.bindTexture(gl.TEXTURE_2D, t.pid);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, prep.w, prep.h, 0, gl.RED, gl.UNSIGNED_BYTE, prep.pid);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, prep.w, prep.h, 0, gl.RG, gl.UNSIGNED_BYTE, prep.pid2);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T].forEach(p => gl.texParameteri(gl.TEXTURE_2D, p, gl.CLAMP_TO_EDGE));
@@ -407,12 +425,13 @@ class GLRenderer {
 const pieceCanvas = new WeakMap();
 function piecesFor(prep) {
   let p = pieceCanvas.get(prep); if (p) return p;
-  const { w, h, pid, img } = prep; p = {};
+  const { w, h, img } = prep; p = {};
   const base = alphaOf(img).canvas.getContext("2d").getImageData(0, 0, w, h);
   for (const k of [PIECE.torso, PIECE.left, PIECE.right]) {
     const c = document.createElement("canvas"); c.width = w; c.height = h;
     const im = new ImageData(new Uint8ClampedArray(base.data), w, h);
-    for (let i = 0; i < w * h; i++) if (pid[i] !== k) im.data[i * 4 + 3] = 0;
+    const p2 = prep.pid2, ch = k === PIECE.torso ? 0 : 1;
+    for (let i = 0; i < w * h; i++) if (p2[i * 2 + ch] !== k) im.data[i * 4 + 3] = 0;
     c.getContext("2d").putImageData(im, 0, 0); p[k] = c;
   }
   pieceCanvas.set(prep, p); return p;
