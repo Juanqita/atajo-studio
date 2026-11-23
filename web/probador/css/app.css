@@ -158,7 +158,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--deep);outline:none;bo
 .handle.hem::before{background:var(--mist);border-color:var(--deep)}
 .handle span{position:absolute;top:40px;white-space:nowrap;background:var(--deep);color:#fff;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px}
 .preview-duo{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}
-.preview-duo #pv{width:100%;height:auto;background:var(--paper);border-radius:14px;border:1px solid var(--line)}
+.preview-duo #pv,.preview-duo #pv2{width:100%;height:auto;background:var(--paper);border-radius:14px;border:1px solid var(--line)}
+.pose-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start}
+.pose-duo figure{margin:0}.pose-duo figcaption{text-align:center;margin-top:4px;color:var(--muted);font-size:13px}
+.pose-duo .hint{grid-column:1/-1;margin:0}
+.handle.pit::before{background:#2FA36B}
+.handle.elbow::before{background:#2E6FD8}
+.handle.cuff::before{background:#7A4FD0}
+.handle[hidden]{display:none}
 
 /* Analítica */
 .bars{display:grid;gap:10px}

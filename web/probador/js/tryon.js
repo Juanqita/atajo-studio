@@ -1,5 +1,8 @@
 /* Probador en vivo embebible: cámara + MediaPipe Pose + prendas de la tienda. */
-import { drawGarment, drawPhotoGarment, drawGuide, guideGeom, drawThumb, len, sub, lerp } from "./engine.js";
+import { drawGarment, drawGuide, guideGeom, drawThumb, len, sub, lerp } from "./engine.js";
+import { prepareGarment, PhotoRig, renderPhoto } from "./garment.js";
+import { PointFilter, OneEuro } from "./filters.js";
+import { Ambient, HandOcclusion } from "./ambient.js";
 import { cop } from "./db.js";
 
 let landmarkerP = null;
@@ -58,7 +61,10 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
   const cv = $(".to-view"), ctx = cv.getContext("2d"), video = $(".to-cam");
   const statusEl = $(".to-status"), metaEl = $(".to-meta");
   let current = items[0], landmarker = null, source = null, srcW = 0, srcH = 0, isImage = false;
-  let perfSent = false, smooth = null, locked = false, alignStart = 0, lostAt = 0, lastSeen = 0, raf = 0, stopped = false, stream = null;
+  let perfSent = false, filters = {}, yawF = new OneEuro({ minCutoff: .8, beta: .3 }), rig = null, rigFor = null, lastT = 0, lowFps = 0;
+  const ambient = new Ambient(), hands = new HandOcclusion();
+  const fx = { occlusion: true, shadow: true, light: true };
+  let smooth = null, locked = false, alignStart = 0, lostAt = 0, lastSeen = 0, raf = 0, stopped = false, stream = null;
   const gesture = { start: 0, cool: 0 }, stats = { frames: 0, fps: 0, last: performance.now(), detMs: 0 };
   const status = (t, ok) => { statusEl.textContent = t; statusEl.classList.toggle("ok", !!ok); };
 
@@ -97,7 +103,7 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
   const ro = new ResizeObserver(resize); ro.observe(root); resize();
 
   const mapPt = l => { const W = cv.width, H = cv.height, s = Math.max(W / srcW, H / srcH), dx = (W - srcW * s) / 2, dy = (H - srcH * s) / 2;
-    return { x: W - (dx + l.x * srcW * s), y: dy + l.y * srcH * s, v: l.visibility ?? 1 }; };
+    return { x: W - (dx + l.x * srcW * s), y: dy + l.y * srcH * s, z: (l.z || 0) * srcW * s, v: l.visibility ?? 1 }; };
 
   function frame() {
     if (stopped) return;
@@ -106,6 +112,7 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
     if (!isImage && source.readyState < 2) return;
     const W = cv.width, H = cv.height, s = Math.max(W / srcW, H / srcH);
     ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1); ctx.drawImage(source, (W - srcW * s) / 2, (H - srcH * s) / 2, srcW * s, srcH * s); ctx.restore();
+    const frameInfo = { W, H, s, dx: (W - srcW * s) / 2, dy: (H - srcH * s) / 2, srcW, srcH };
     const t0 = performance.now(); let res;
     try { res = landmarker.detectForVideo(source, t0); } catch { return; }
     stats.detMs = stats.detMs * .9 + (performance.now() - t0) * .1;
@@ -113,14 +120,23 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
     let body = null;
     if (lm) {
       const P = i => mapPt(lm[i]);
-      const raw = { nose: P(0), s11: P(11), s12: P(12), e11: P(13), e12: P(14), w11: P(15), w12: P(16), h23: P(23), h24: P(24) };
+      const raw = { nose: P(0), s11: P(11), s12: P(12), e11: P(13), e12: P(14), w11: P(15), w12: P(16), h23: P(23), h24: P(24),
+        p17: P(17), p18: P(18), i19: P(19), i20: P(20), t21: P(21), t22: P(22) };
       if (raw.s11.v > .5 && raw.s12.v > .5) {
-        const a = isImage ? 1 : 0.55;
-        if (!smooth) smooth = raw; else for (const k in raw) smooth[k] = { x: smooth[k].x + (raw[k].x - smooth[k].x) * a, y: smooth[k].y + (raw[k].y - smooth[k].y) * a, v: raw[k].v };
-        body = { ...smooth, visHips: raw.h23.v > .4 && raw.h24.v > .4 }; lastSeen = now;
+        // Filtro One Euro (A2): quita el temblor sin retraso visible. beta se normaliza por el tamaño del cuerpo.
+        const tS = now / 1000, size = Math.max(40, len(sub(raw.s11, raw.s12)) * 3);
+        if (!smooth) filters = {};
+        smooth = {};
+        for (const k in raw) { const f = filters[k] || (filters[k] = new PointFilter({ minCutoff: isImage ? 1e3 : .9, beta: 25, dCutoff: 1 })); smooth[k] = f.filter(raw[k], tS, size); }
+        // Giro del torso con los puntos 3D (metros) de MediaPipe: hombro 11 menos hombro 12
+        const wl = res.worldLandmarks && res.worldLandmarks[0];
+        let yaw = 0;
+        if (wl) yaw = Math.atan2(wl[11].z - wl[12].z, wl[11].x - wl[12].x);
+        yaw = isImage ? yaw : yawF.filter(yaw, tS);
+        body = { ...smooth, yaw, visHips: raw.h23.v > .4 && raw.h24.v > .4 }; lastSeen = now;
       }
     }
-    if (!body && now - lastSeen > 400) smooth = null;
+    if (!body && now - lastSeen > 400) { smooth = null; yawF.reset(); rig?.reset(); }
     if (!locked) {
       let ok = false, msg = "Ubícate dentro de la silueta";
       if (body) {
@@ -141,15 +157,34 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
     if (locked) {
       if (body) {
         lostAt = 0;
-        if (current.g.source === "photo" && current.img) drawPhotoGarment(ctx, body, current.img, current.g.anchors);
+        if (current.g.source === "photo" && current.img) drawPhoto(body, now);
         else drawGarment(ctx, body, current.g);
+        if (fx.occlusion) hands.draw(ctx, source, body, frameInfo, current, current.g.source === "photo" ? rig?.lastFrame : null);
         status(current.g.name, true);
         gestureCheck(body, now);
       } else { if (!lostAt) lostAt = now; if (now - lostAt > 1500) { locked = false; alignStart = 0; updateBuy(); } }
     }
-    stats.frames++; if (now - stats.last > 1000) { stats.fps = stats.frames * 1000 / (now - stats.last); stats.frames = 0; stats.last = now; if (locked && !perfSent && stats.fps) { perfSent = true; track("perf", { fps: Math.round(stats.fps) }); } }
-    metaEl.textContent = `${stats.fps.toFixed(0)} fps`;
+    stats.frames++; if (now - stats.last > 1000) { stats.fps = stats.frames * 1000 / (now - stats.last); stats.frames = 0; stats.last = now; if (locked && !perfSent && stats.fps) { perfSent = true; track("perf", { fps: Math.round(stats.fps) }); }
+      // A5: si bajan de 15 cuadros por segundo dos segundos seguidos, se apagan los efectos más caros
+      if (locked && !isImage) { lowFps = stats.fps < 15 ? lowFps + 1 : 0; if (lowFps >= 2 && (fx.occlusion || fx.shadow)) { fx.occlusion = false; fx.shadow = false; console.info("Probador: bajo rendimiento, apago brazos por delante y sombra"); } }
+    }
+    metaEl.textContent = `${stats.fps.toFixed(0)} fps${fx.occlusion ? "" : " · modo liviano"}`;
   }
+  function drawPhoto(body, now) {
+    const it = current;
+    if (rigFor !== it) {
+      const prep = prepareGarment(it.img, it.g.anchors);
+      rig = new PhotoRig(prep, it.g); rigFor = it;
+    }
+    rig.dynamic = !isImage;
+    const dt = lastT ? Math.min(.1, (now - lastT) / 1000) : 0; lastT = now;
+    const frame = rig.update(body, dt); rig.lastFrame = frame;
+    const look = { edge: .9, shadow: fx.shadow ? .3 : 0, tint: fx.light ? ambient.sample(source, body, frame, mapBack) : [1, 1, 1] };
+    renderPhoto(ctx, rig.prep, frame, look);
+  }
+  // pantalla (espejo) -> coordenadas de la fuente, para medir la luz del video
+  const mapBack = p => { const W = cv.width, H = cv.height, s = Math.max(W / srcW, H / srcH), dx = (W - srcW * s) / 2, dy = (H - srcH * s) / 2;
+    return { x: (W - p.x - dx) / s, y: (p.y - dy) / s }; };
   function gestureCheck(b, now) {
     if (isImage || now < gesture.cool) return;
     const sw = len(sub(b.s11, b.s12)), up = b.w12.v > .5 && b.w12.y < b.s12.y - sw * 0.35;

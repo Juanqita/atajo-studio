@@ -2,7 +2,8 @@
 import { db, session, uid, slugify, PLANS, cop, ensureSample } from "./db.js";
 import { mountTryon } from "./tryon.js";
 import { drawGarment, drawPhotoGarment, drawMannequin, drawThumb, thumbBody } from "./engine.js";
-import { loadToCanvas, checkQuality, removeBackground, guessAnchors, canvasToBlob, blobToImage } from "./capture.js";
+import { loadToCanvas, checkQuality, removeBackground, autoTolerance, guessAnchors, guessSleeves, canvasToBlob, blobToImage } from "./capture.js";
+import { STIFFNESS } from "./filters.js";
 
 const app = document.getElementById("app");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -130,7 +131,7 @@ function register(plan) {
     <p style="color:var(--muted);margin-bottom:22px">Toma un minuto. Después subes tu primera prenda desde el celular.</p>
     <form class="form" id="f">
       <div class="field"><label for="name">Nombre de la tienda</label><input id="name" type="text" required maxlength="60" autocomplete="organization" placeholder="Ej.: Novecento"></div>
-      <div class="field"><label for="slug">Tu enlace</label><input id="slug" type="text" required maxlength="40" pattern="[a-z0-9\-]+" inputmode="url"><span class="hint" id="slugHint"></span></div>
+      <div class="field"><label for="slug">Tu enlace</label><input id="slug" type="text" required maxlength="40" pattern="[a-z0-9\\-]+" inputmode="url"><span class="hint" id="slugHint"></span></div>
       <div class="field"><label for="city">Ciudad</label><input id="city" type="text" maxlength="40" placeholder="Pereira"></div>
       <div class="field"><label for="wa">WhatsApp de ventas</label><input id="wa" type="tel" inputmode="tel" maxlength="20" placeholder="311 000 0000"><span class="hint">Aquí llegan los pedidos del botón "Pedir por WhatsApp".</span></div>
       <fieldset class="field" style="border:0;padding:0;margin:0"><legend style="font-weight:600;margin-bottom:6px">Plan</legend>
@@ -277,12 +278,22 @@ function detailsForm(g = {}) {
       <div class="pills">${KINDS.map(([k, t]) => `<label class="pill"><input type="radio" name="kind" value="${k}" ${(g.kind || "shirt") === k ? "checked" : ""}>${t}</label>`).join("")}</div></fieldset>
     <fieldset class="field" style="border:0;padding:0;margin:0"><legend style="font-weight:600;margin-bottom:6px">Tallas disponibles</legend>
       <div class="pills">${SIZES.map(s => `<label class="pill"><input type="checkbox" name="size" value="${s}" ${(g.sizes || ["S", "M", "L"]).includes(s) ? "checked" : ""}>${s}</label>`).join("")}</div></fieldset>
+    <div class="field"><label for="gstiff">Caída de la tela</label><input id="gstiff" type="range" min="0" max="100" value="${Math.round((g.stiff ?? STIFFNESS[g.kind || "shirt"] ?? 0.5) * 100)}" ${g.stiff == null ? 'data-auto="1"' : ""}>
+      <span class="hint between"><span>Suelta (se mece más)</span><span>Rígida</span></span><span class="hint">Se ajusta solo según el tipo; chaquetas y blazers se mecen menos que camisas y blusas.</span></div>
     <div class="field"><label for="glink">Enlace de compra (opcional)</label><input id="glink" type="url" value="${esc(g.link || "")}" placeholder="https://mitienda.com/producto"><span class="hint">Si lo dejas vacío, el botón del probador abre tu WhatsApp con la prenda escrita.</span></div>`;
+}
+/* El control de caída sigue al tipo de prenda hasta que la tienda lo mueve. */
+function bindStiff(form) {
+  const st = $("#gstiff", form); if (!st) return;
+  st.oninput = () => { delete st.dataset.auto; };
+  form.addEventListener("change", e => { if (e.target.name === "kind" && st.dataset.auto) st.value = Math.round((STIFFNESS[e.target.value] ?? .5) * 100); });
 }
 function readDetails(form) {
   const fd = new FormData(form);
   const link = $("#glink", form).value.trim();
+  const st = $("#gstiff", form);
   return { name: $("#gname", form).value.trim(), price: Number($("#gprice", form).value) || 0, kind: fd.get("kind"), sizes: fd.getAll("size"),
+    stiff: st && !st.dataset.auto ? Number(st.value) / 100 : null,
     link: /^https?:\/\//.test(link) ? link : "" };
 }
 
@@ -292,6 +303,7 @@ async function editGarment(main, shop, id) {
   main.insertAdjacentHTML("beforeend", `<div class="page-h"><div><h1>Editar prenda</h1></div><a class="btn" href="#/panel/prendas">Volver</a></div>
     <form class="panel form" id="ef" style="max-width:640px">${detailsForm(g)}
       <div class="between"><button type="button" class="btn btn-ghost" id="del" style="color:var(--bad)">Eliminar prenda</button><button class="btn btn-primary" type="submit">Guardar cambios</button></div></form>`);
+  bindStiff($("#ef"));
   $("#ef").onsubmit = async e => { e.preventDefault(); Object.assign(g, readDetails(e.target)); if (g.source === "preset") g.kind = g.kind; await db.saveGarment(g); toast("Cambios guardados"); location.hash = "#/panel/prendas"; };
   $("#del").onclick = async () => { $("#del").textContent = "Toca otra vez para eliminar"; $("#del").onclick = async () => { await db.deleteGarment(g.id); toast("Prenda eliminada"); location.hash = "#/panel/prendas"; }; };
 }
@@ -300,7 +312,7 @@ async function editGarment(main, shop, id) {
 async function newGarment(main, shop) {
   const count = (await db.garments(shop.id)).length;
   if (count >= PLANS[shop.plan].garments) { location.hash = "#/panel/plan"; toast("Llegaste al límite de prendas de tu plan"); return; }
-  const S = { step: 0, raw: null, cut: null, tol: 38, anchors: null, cutImg: null, stream: null };
+  const S = { step: 0, raw: null, cut: null, tol: null, anchors: null, cutImg: null, stream: null };
   const names = ["Preparar", "Foto", "Recorte", "Puntos", "Datos"];
   main.insertAdjacentHTML("beforeend", `<div class="page-h"><div><h1>Subir una prenda</h1><p>Te guiamos paso a paso. Toma unos 3 minutos.</p></div><a class="btn" href="#/panel/prendas">Cancelar</a></div>
     <div class="wizard"><ol class="stepper">${names.map((n, i) => `<li data-i="${i}">${i + 1}. ${n}</li>`).join("")}</ol><div id="wz"></div></div>`);
@@ -322,7 +334,7 @@ async function newGarment(main, shop) {
     $("#cam", wz).onclick = () => go(1);
     $("#file", wz).onchange = e => e.target.files[0] && fromFile(e.target.files[0]);
   }
-  async function fromFile(f) { const img = new Image(); img.src = URL.createObjectURL(f); await img.decode(); S.raw = loadToCanvas(img); S.step = 1; go(1); }
+  async function fromFile(f) { const img = new Image(); img.src = URL.createObjectURL(f); await img.decode(); S.raw = loadToCanvas(img); S.tol = null; S.step = 1; go(1); }
 
   function shirtOutline(x, w, h) {
     x.save(); x.strokeStyle = "#FFB627"; x.lineWidth = Math.max(3, w * 0.008); x.setLineDash([w * 0.025, w * 0.018]);
@@ -364,13 +376,14 @@ async function newGarment(main, shop) {
         <p style="color:var(--muted)">${ok ? "La foto está lista para recortar." : "Puedes seguir, pero el recorte puede salir con errores. Mejor repetirla con los consejos."}</p>
         <div class="row"><button class="btn ${ok ? "btn-primary" : ""}" id="next">${ok ? "Continuar" : "Continuar de todos modos"}</button><button class="btn ${ok ? "btn-ghost" : "btn-primary"}" id="redo">Repetir foto</button></div></div></div></section>`;
     S.raw.style.maxHeight = "60vh"; S.raw.style.borderRadius = "10px"; $("#ph", wz).append(S.raw);
-    $("#redo", wz).onclick = () => { S.raw = null; go(1); };
+    $("#redo", wz).onclick = () => { S.raw = null; S.tol = null; go(1); };
     $("#next", wz).onclick = () => go(2);
   }
   function cut() {
+    if (S.tol == null) S.tol = autoTolerance(S.raw);
     wz.innerHTML = `<section class="panel"><h2>Recorte automático</h2><p style="color:var(--muted)">Quitamos el fondo. Si se comió parte de la prenda o dejó fondo, mueve el control.</p>
       <div class="checkered" id="cv" style="min-height:240px"></div>
-      <div class="field" style="max-width:520px"><label for="tol">Sensibilidad del recorte</label><input id="tol" type="range" min="10" max="90" value="${S.tol}"><span class="hint">Menos: conserva más. Más: quita más fondo.</span></div>
+      <div class="field" style="max-width:520px"><label for="tol">Sensibilidad del recorte</label><input id="tol" type="range" min="5" max="90" value="${S.tol}"><span class="hint">Menos: conserva más. Más: quita más fondo.</span></div>
       <p id="warn" class="notice" hidden></p>
       <div class="row"><button class="btn btn-primary" id="next">Se ve bien</button><button class="btn btn-ghost" id="back">Repetir foto</button></div></section>`;
     const render = () => {
@@ -384,33 +397,56 @@ async function newGarment(main, shop) {
       r.canvas.style.maxHeight = "55vh"; box.append(r.canvas);
     };
     let t; $("#tol", wz).oninput = e => { S.tol = +e.target.value; clearTimeout(t); t = setTimeout(render, 120); };
-    $("#back", wz).onclick = () => { S.raw = null; go(1); };
-    $("#next", wz).onclick = () => { S.anchors = guessAnchors(S.cut); go(3); };
+    $("#back", wz).onclick = () => { S.raw = null; S.tol = null; go(1); };
+    $("#next", wz).onclick = () => { S.anchors = guessSleeves(S.cut, guessAnchors(S.cut)); go(3); };
     setTimeout(render, 30);
   }
   function points() {
-    wz.innerHTML = `<section class="panel"><h2>Marca hombros y ruedo</h2><p style="color:var(--muted)">Arrastra los puntos naranja a las costuras de los hombros y los azules a las esquinas del ruedo. Así la prenda cae bien en el cuerpo.</p>
-      <div class="preview-duo"><div class="anchor-stage" id="st"></div><div><canvas id="pv" width="400" height="400" aria-label="Vista previa en maniquí"></canvas><p class="hint" style="text-align:center;margin-top:6px;color:var(--muted)">Vista previa</p></div></div>
+    const SLEEVES = [["long", "Manga larga"], ["short", "Manga corta"], ["none", "Sin manga"]];
+    wz.innerHTML = `<section class="panel"><h2>Marca los puntos de la prenda</h2><p style="color:var(--muted)">Ya los ubicamos solos. Revisa que cada uno esté en su lugar y arrástralo si hace falta: <b>hombros</b> en las costuras, <b>ruedo</b> en las esquinas de abajo, <b>axilas</b> donde la manga se une al cuerpo, y <b>codo</b> y <b>puño</b> en el centro de cada manga.</p>
+      <fieldset class="field" style="border:0;padding:0;margin:0 0 12px"><legend style="font-weight:600;margin-bottom:6px">Tipo de manga</legend>
+        <div class="pills" id="sleeve">${SLEEVES.map(([k, t]) => `<label class="pill"><input type="radio" name="sleeve" value="${k}" ${S.anchors.sleeve === k ? "checked" : ""}>${t}</label>`).join("")}</div></fieldset>
+      <div class="preview-duo"><div class="anchor-stage" id="st"></div><div class="pose-duo">
+        <figure><canvas id="pv" width="360" height="360" aria-label="Vista previa en maniquí con brazos abajo"></canvas><figcaption>Brazos abajo</figcaption></figure>
+        <figure><canvas id="pv2" width="360" height="360" aria-label="Vista previa en maniquí con brazos en movimiento"></canvas><figcaption>Brazos en movimiento</figcaption></figure>
+        <p class="hint" style="color:var(--muted)">Así se va a ver en el probador. Si una manga se ve cortada o torcida, mueve su axila, codo o puño.</p></div></div>
       <div class="row"><button class="btn btn-primary" id="next">Continuar</button><button class="btn btn-ghost" id="back">Atrás</button></div></section>`;
     const st = $("#st", wz), c = document.createElement("canvas"); c.width = S.cut.width; c.height = S.cut.height;
-    const cx = c.getContext("2d"); cx.drawImage(S.cut, 0, 0); st.append(c);
+    const cx = c.getContext("2d"); st.append(c);
     st.style.background = "repeating-conic-gradient(#EEE8DC 0 25%,#F7F3EC 0 50%) 0 0/20px 20px"; st.style.borderRadius = "12px";
-    const pv = $("#pv", wz), px = pv.getContext("2d");
-    const draw = () => { px.clearRect(0, 0, 400, 400); drawMannequin(px, 400); drawPhotoGarment(px, thumbBody(400), S.cut, S.anchors); };
-    const labels = { sL: "Hombro", sR: "Hombro", hL: "Ruedo", hR: "Ruedo" };
-    for (const k of ["sL", "sR", "hL", "hR"]) {
-      const h = document.createElement("button"); h.type = "button"; h.className = "handle" + (k[0] === "h" ? " hem" : ""); h.setAttribute("aria-label", labels[k] + (k[1] === "L" ? " izquierdo" : " derecho") + ", usa las flechas para mover");
-      h.innerHTML = `<span>${labels[k]}</span>`; st.append(h);
-      const place = () => { h.style.left = (S.anchors[k].x / c.width * 100) + "%"; h.style.top = (S.anchors[k].y / c.height * 100) + "%"; };
-      place();
+    const pv = [$("#pv", wz), $("#pv2", wz)];
+    const A = S.anchors;
+    // Guía sobre la foto: costuras (hombro → axila → ruedo) y eje de cada manga (axila → codo → puño)
+    const guide = () => {
+      cx.clearRect(0, 0, c.width, c.height); cx.drawImage(S.cut, 0, 0);
+      const lw = Math.max(2, c.width / 260); cx.lineWidth = lw; cx.setLineDash([lw * 3, lw * 2]); cx.lineCap = "round";
+      const path = (pts, col) => { cx.strokeStyle = col; cx.beginPath(); pts.forEach((p, i) => i ? cx.lineTo(p.x, p.y) : cx.moveTo(p.x, p.y)); cx.stroke(); };
+      if (A.sleeve !== "none") { path([A.sL, A.aL, A.hL], "#F08A12cc"); path([A.sR, A.aR, A.hR], "#F08A12cc"); }
+      if (A.sleeve === "long") for (const [s, a, e, k] of [[A.sL, A.aL, A.eL, A.cL], [A.sR, A.aR, A.eR, A.cR]]) path([{ x: (s.x + a.x) / 2, y: (s.y + a.y) / 2 }, e, k], "#2E6FD8cc");
+      cx.setLineDash([]);
+    };
+    let queued = false;
+    const draw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; guide();
+      ["down", "bent"].forEach((pose, i) => { const x = pv[i].getContext("2d"), B = thumbBody(360, pose); x.clearRect(0, 0, 360, 360); drawMannequin(x, 360, B); drawPhotoGarment(x, B, S.cut, A, { kind: "shirt" }); }); }); };
+    const labels = { sL: "Hombro", sR: "Hombro", hL: "Ruedo", hR: "Ruedo", aL: "Axila", aR: "Axila", eL: "Codo", eR: "Codo", cL: "Puño", cR: "Puño" };
+    const handles = {};
+    for (const k of Object.keys(labels)) {
+      const h = document.createElement("button"); h.type = "button"; h.className = "handle " + ({ h: "hem", a: "pit", e: "elbow", c: "cuff" }[k[0]] || "");
+      h.setAttribute("aria-label", labels[k] + (k[1] === "L" ? " izquierdo" : " derecho") + ", usa las flechas para mover");
+      h.innerHTML = `<span>${labels[k]}</span>`; st.append(h); handles[k] = h;
+      const place = () => { h.style.left = (A[k].x / c.width * 100) + "%"; h.style.top = (A[k].y / c.height * 100) + "%"; };
+      h.place = place; place();
       h.onpointerdown = e => { h.setPointerCapture(e.pointerId); h.style.cursor = "grabbing"; };
       h.onpointermove = e => { if (!h.hasPointerCapture(e.pointerId)) return; const r = c.getBoundingClientRect();
-        S.anchors[k] = { x: Math.max(0, Math.min(c.width, (e.clientX - r.left) / r.width * c.width)), y: Math.max(0, Math.min(c.height, (e.clientY - r.top) / r.height * c.height)) }; place(); draw(); };
+        A[k] = { x: Math.max(0, Math.min(c.width, (e.clientX - r.left) / r.width * c.width)), y: Math.max(0, Math.min(c.height, (e.clientY - r.top) / r.height * c.height)) }; place(); draw(); };
       h.onpointerup = () => { h.style.cursor = ""; };
       h.onkeydown = e => { const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!d) return; e.preventDefault();
-        const step = c.width / 100; S.anchors[k] = { x: S.anchors[k].x + d[0] * step, y: S.anchors[k].y + d[1] * step }; place(); draw(); };
+        const step = c.width / 100; A[k] = { x: A[k].x + d[0] * step, y: A[k].y + d[1] * step }; place(); draw(); };
     }
-    draw();
+    // Sin manga o manga corta: se ocultan codo y puño (el largo de la manga corta se toma de la foto)
+    const showSleeve = () => { for (const k of ["eL", "eR", "cL", "cR"]) handles[k].hidden = A.sleeve !== "long"; for (const k of ["aL", "aR"]) handles[k].hidden = false; };
+    $("#sleeve", wz).onchange = e => { A.sleeve = e.target.value; showSleeve(); draw(); };
+    showSleeve(); draw();
     $("#back", wz).onclick = () => go(2);
     $("#next", wz).onclick = () => go(4);
   }
@@ -419,6 +455,7 @@ async function newGarment(main, shop) {
       <label class="pill" style="justify-content:flex-start;opacity:.6"><input type="checkbox" disabled>Generar también el modelo 3D (visor 360° y realidad aumentada) <span class="soon">Próximamente</span></label>
       <div class="row"><button class="btn btn-primary" type="submit">Guardar y publicar</button><button class="btn btn-ghost" type="button" id="back">Atrás</button></div></form>`;
     $("#back", wz).onclick = () => go(3);
+    bindStiff($("#df", wz));
     $("#df", wz).onsubmit = async e => {
       e.preventDefault();
       const btn = e.submitter; btn.disabled = true; btn.textContent = "Guardando…";

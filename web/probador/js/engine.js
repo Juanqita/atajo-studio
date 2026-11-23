@@ -1,5 +1,6 @@
 /* Motor de dibujo del probador (tomado de la demo de Novecento y ampliado para prendas fotografiadas).
    Puntos del cuerpo en pantalla: s11/s12 hombros, e codos, w muñecas, h caderas (numeración de MediaPipe Pose). */
+import { drawPhotoMesh } from "./garment.js";
 export function shade(hex, f){ // f>0 aclara, f<0 oscurece
   const n = parseInt(hex.slice(1),16); let r=n>>16,g=n>>8&255,b=n&255;
   const t = f<0?0:255, p=Math.abs(f);
@@ -200,46 +201,37 @@ export function drawGuide(x, ok, progress){
 
 
 /* ---------- Prenda fotografiada ----------
-   La foto (sin fondo) trae 4 puntos marcados por la tienda en la captura guiada:
-   sL/sR = costuras de hombro (izquierda/derecha de la foto), hL/hR = esquinas del ruedo.
-   Se ubica con una transformación afín: hombros de la foto sobre los hombros del cliente,
-   eje vertical hacia las caderas y largo ajustado para que el ruedo caiga cerca de la cadera. */
-export function drawPhotoGarment(x, B, img, a, alpha = 1) {
-  const shMid = lerp(B.s12, B.s11, .5);
-  const sw = len(sub(B.s11, B.s12));
-  const d = norm(sub(B.s12, B.s11));               // hacia el lado del hombro 12 (izquierda de la foto en espejo)
-  let v = perp(d); if (v.y < 0) v = mul(v, -1);
-  const hipMid = B.visHips ? lerp(B.h24, B.h23, .5) : add(shMid, mul(v, sw * 1.35));
-  const down = B.visHips ? norm(sub(hipMid, shMid)) : v;
-  const imgSh = len(sub(a.sR, a.sL)) || 1;
-  const cx = (a.sL.x + a.sR.x) / 2, cy = (a.sL.y + a.sR.y) / 2;
-  const hemY = (a.hL.y + a.hR.y) / 2;
-  const k = (sw * 1.12) / imgSh;                   // la costura del hombro queda un poco por fuera del hombro
-  const want = len(sub(hipMid, shMid)) + sw * 0.18; // ruedo un poco por debajo de la cadera
-  const imgLen = Math.max(1, hemY - cy);
-  const ky = Math.min(k * 1.18, Math.max(k * 0.85, want / imgLen));
-  const top = add(shMid, mul(down, -sw * 0.03));
-  const A = -d.x * k, Bb = -d.y * k, C = down.x * ky, D = down.y * ky;
-  x.save();
-  x.globalAlpha = alpha;
-  x.transform(A, Bb, C, D, top.x - A * cx - C * cy, top.y - Bb * cx - D * cy);
-  x.drawImage(img, 0, 0);
-  x.restore();
+   La foto (sin fondo) trae los puntos marcados por la tienda en la captura guiada:
+   sL/sR costuras de hombro, hL/hR esquinas del ruedo y, por manga, aL/aR axila, eL/eR codo y cL/cR puño.
+   El dibujo con malla (torso deformable y mangas en dos tramos) está en garment.js. */
+export function drawPhotoGarment(x, B, img, a, g = {}, look) {
+  return drawPhotoMesh(x, B, img, a, g, look);
 }
 
-/* Cuerpo fijo para miniaturas y vista previa (coordenadas en un lienzo de 200x200, ya en espejo). */
-export function thumbBody(size = 200) {
+/* Cuerpo fijo para miniaturas y vista previa (coordenadas en un lienzo de 200x200, ya en espejo).
+   pose "down": brazos abajo; "bent": codos afuera y antebrazos cruzando por delante del torso. */
+export function thumbBody(size = 200, pose = "down") {
   const s = size / 200, P = (a, b) => ({ x: a * s, y: b * s });
-  return { s12: P(62, 52), s11: P(138, 52), e12: P(46, 110), e11: P(154, 110), w12: P(44, 165), w11: P(156, 165), h24: P(72, 160), h23: P(128, 160), nose: P(100, 20), visHips: true };
+  const b = { s12: P(62, 52), s11: P(138, 52), e12: P(46, 110), e11: P(154, 110), w12: P(44, 165), w11: P(156, 165), h24: P(72, 160), h23: P(128, 160), nose: P(100, 20), visHips: true };
+  if (pose === "bent") Object.assign(b, { e12: P(34, 100), w12: P(84, 122), e11: P(170, 64), w11: P(176, 14) });
+  return b;
 }
 
-/* Maniquí simple para la vista previa de la captura. */
-export function drawMannequin(x, size = 200) {
-  const s = size / 200; x.save(); x.scale(s, s);
-  x.fillStyle = "#D8CFBF";
+/* Maniquí simple para la vista previa de la captura, con brazos que siguen el cuerpo B. */
+export function drawMannequin(x, size = 200, B = thumbBody(size)) {
+  const s = size / 200; x.save();
+  x.fillStyle = "#D8CFBF"; x.strokeStyle = "#D8CFBF"; x.lineCap = "round"; x.lineJoin = "round";
+  x.save(); x.scale(s, s);
   x.beginPath(); x.ellipse(100, 22, 15, 18, 0, 0, 7); x.fill();
   x.fillRect(92, 36, 16, 14);
   x.beginPath(); x.moveTo(58, 52); x.quadraticCurveTo(100, 40, 142, 52); x.lineTo(150, 110); x.lineTo(132, 200); x.lineTo(68, 200); x.lineTo(50, 110); x.closePath(); x.fill();
+  x.restore();
+  x.fillStyle = "#CFC5B3"; x.strokeStyle = "#CFC5B3";
+  for (const [a, e, w] of [[B.s12, B.e12, B.w12], [B.s11, B.e11, B.w11]]) {
+    x.lineWidth = 17 * s; x.beginPath(); x.moveTo(a.x, a.y + 4 * s); x.lineTo(e.x, e.y); x.stroke();
+    x.lineWidth = 13 * s; x.beginPath(); x.moveTo(e.x, e.y); x.lineTo(w.x, w.y); x.stroke();
+    x.beginPath(); x.arc(w.x, w.y, 8 * s, 0, 7); x.fill();
+  }
   x.restore();
 }
 
