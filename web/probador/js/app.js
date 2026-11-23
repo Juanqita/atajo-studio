@@ -69,7 +69,7 @@ function landing() {
         <h1>Que tus clientes se vean con tu ropa antes de comprar.</h1>
         <p class="lead">Sube tus prendas con el celular y comparte un enlace. Tus clientes se paran frente a la cámara y se ven con la prenda puesta, en vivo. Sin apps, sin registro y sin que el video salga de su teléfono.</p>
         <div class="ctas"><a class="btn btn-primary" href="#/registro">Crear mi tienda gratis</a><a class="btn" href="#/t/demo">Probar la demo</a></div>
-        <p class="hint" style="margin-top:14px;color:var(--muted);font-size:14px">14 días gratis · planes desde ${cop(PLANS.vitrina.price)} al mes</p>
+        <p class="hint" style="margin-top:14px;color:var(--muted);font-size:14px">14 días gratis · planes desde XXX al mes</p>
       </div>
       <div class="hero-art" aria-hidden="true">
         <canvas width="400" height="400" id="heroCv"></canvas>
@@ -100,7 +100,7 @@ function landing() {
 function plansGrid(cta = true) {
   const f = (p, items, who, tag) => `<article class="plan ${tag ? "featured" : ""}">${tag ? `<span class="tag">${tag}</span>` : ""}
     <h3>${p.name}</h3><p class="who">${who}</p>
-    <p class="price">${p.id === "cadena" ? '<small>desde </small>' : ""}${cop(p.price)} <small>COP al mes</small></p>
+    <p class="price">${p.id === "cadena" ? '<small>desde </small>' : ""}XXX <small>al mes</small></p>
     <ul>${items.map(i => `<li>${i}</li>`).join("")}</ul>
     ${cta ? `<a class="btn ${tag ? "btn-primary" : ""}" href="#/registro?plan=${p.id}">${p.id === "cadena" ? "Hablar con Atajo" : "Empezar 14 días gratis"}</a>` : ""}</article>`;
   return `<div class="plans">
@@ -113,10 +113,10 @@ function plansGrid(cta = true) {
 function plansPage() {
   app.innerHTML = `${siteNav()}<main class="section">
     <p class="kicker">Planes y precios</p><h1 style="font-size:clamp(28px,4vw,44px);margin-bottom:12px">Un probador para cada tipo de tienda</h1>
-    <p style="color:var(--muted);max-width:640px;margin-bottom:36px">Precios en pesos colombianos, sin IVA. 14 días gratis en Vitrina y Tienda. Pago anual con 2 meses de regalo.</p>
+    <p style="color:var(--muted);max-width:640px;margin-bottom:36px">Precios por definir. 14 días gratis en Vitrina y Tienda. Pago anual con 2 meses de regalo.</p>
     ${plansGrid()}
     <div class="grid2" style="margin-top:36px">
-      <div class="panel"><h2>Extras</h2><p>100 fotos con IA adicionales por ${cop(39000)} · 10 modelos 3D por ${cop(49000)}.</p><p>Puesta en marcha con Atajo (fotos y carga de las primeras 30 prendas, configuración del tótem y capacitación): ${cop(490000)}.</p></div>
+      <div class="panel"><h2>Extras</h2><p>100 fotos con IA adicionales por XXX · 10 modelos 3D por XXX.</p><p>Puesta en marcha con Atajo (fotos y carga de las primeras 30 prendas, configuración del tótem y capacitación): XXX.</p></div>
       <div class="panel"><h2>Para tener claro</h2><p>El espejo en vivo muestra estilo, color y estampado; no reemplaza la tabla de tallas. Las fotos con IA solo se generan con autorización del cliente y se borran a las 24 horas.</p></div>
     </div></main>${footer()}`;
 }
@@ -134,7 +134,7 @@ function register(plan) {
       <div class="field"><label for="city">Ciudad</label><input id="city" type="text" maxlength="40" placeholder="Pereira"></div>
       <div class="field"><label for="wa">WhatsApp de ventas</label><input id="wa" type="tel" inputmode="tel" maxlength="20" placeholder="311 000 0000"><span class="hint">Aquí llegan los pedidos del botón "Pedir por WhatsApp".</span></div>
       <fieldset class="field" style="border:0;padding:0;margin:0"><legend style="font-weight:600;margin-bottom:6px">Plan</legend>
-        <div class="pills">${Object.values(PLANS).map(p => `<label class="pill"><input type="radio" name="plan" value="${p.id}" ${p.id === plan ? "checked" : ""}>${p.name} · ${cop(p.price)}</label>`).join("")}</div>
+        <div class="pills">${Object.values(PLANS).map(p => `<label class="pill"><input type="radio" name="plan" value="${p.id}" ${p.id === plan ? "checked" : ""}>${p.name}</label>`).join("")}</div>
         <span class="hint">No se cobra nada en esta demo. El cobro automático (Wompi) llega en la siguiente versión.</span></fieldset>
       <button class="btn btn-primary" type="submit">Crear mi tienda</button>
       <p style="font-size:14px;color:var(--muted)">¿Ya tienes una? <a href="#/entrar">Entrar</a></p>
@@ -524,7 +524,7 @@ function sampleEvents(shopId, gs) {
 async function planView(main, shop) {
   const gs = await db.garments(shop.id), plan = PLANS[shop.plan];
   const meter = (label, used, max, soon) => `<div class="bar"><span>${label}${soon ? ' <span class="soon">Próximamente</span>' : ""}</span><div class="track"><div class="fill ${used / max > .85 ? "alt" : ""}" style="width:${max ? Math.min(100, used / max * 100) : 0}%"></div></div><b>${used} / ${max || "—"}</b></div>`;
-  main.insertAdjacentHTML("beforeend", `<div class="page-h"><div><h1>Tu plan: ${plan.name}</h1><p>${cop(plan.price)} COP al mes · prueba gratis de 14 días.</p></div></div>
+  main.insertAdjacentHTML("beforeend", `<div class="page-h"><div><h1>Tu plan: ${plan.name}</h1><p>XXX al mes · prueba gratis de 14 días.</p></div></div>
     <section class="panel"><h2>Uso de este mes</h2><div class="bars">
       ${meter("Prendas", gs.length, plan.garments)}
       ${meter("Fotos con IA", 0, plan.aiPhotos, true)}
