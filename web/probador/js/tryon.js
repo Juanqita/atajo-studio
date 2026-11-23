@@ -6,14 +6,39 @@ import { Ambient, HandOcclusion } from "./ambient.js";
 import { cop } from "./db.js";
 
 let landmarkerP = null;
+/* Modelo de pose: primero desde el almacenamiento de Google (rápido y en caché en muchos equipos),
+   y si falla o tarda, desde esta misma web. Se muestra el avance de la descarga. */
+const MODEL_CDN = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+const SIZES = { wasm: 9.0e6, model: 5.6e6 }; // tamaño ya descomprimido, para el porcentaje
+async function download(url, expect, onBytes, timeoutMs = 0) {
+  const ctl = new AbortController(); let timer = timeoutMs ? setTimeout(() => ctl.abort(), timeoutMs) : 0;
+  const r = await fetch(url, { signal: ctl.signal });
+  if (!r.ok || !r.body) throw new Error("HTTP " + r.status);
+  const reader = r.body.getReader(), parts = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); got += value.length; onBytes(Math.min(got, expect));
+    if (timer && got > 0) { clearTimeout(timer); timer = 0; } // ya está llegando: no cortar
+  }
+  const out = new Uint8Array(got); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
 function getLandmarker(onStatus) {
   if (landmarkerP) return landmarkerP;
   landmarkerP = (async () => {
-    onStatus?.("Cargando el modelo de visión…");
-    const { PoseLandmarker, FilesetResolver } = await import("../lib/vision_bundle.mjs");
     const base = new URL("../", import.meta.url).href;
+    const prog = { wasm: 0, model: 0 }, total = SIZES.wasm + SIZES.model;
+    const show = () => onStatus?.(`Descargando el probador: ${Math.round((prog.wasm + prog.model) / total * 100)} % (solo la primera vez)`);
+    show();
+    const { PoseLandmarker, FilesetResolver } = await import("../lib/vision_bundle.mjs");
+    // El motor (wasm) se baja con avance; el cargador de MediaPipe lo vuelve a pedir y sale de la caché
+    const wasmP = download(base + "wasm/vision_wasm_internal.wasm", SIZES.wasm, n => { prog.wasm = n; show(); }).catch(() => null);
+    const modelP = download(MODEL_CDN, SIZES.model, n => { prog.model = n; show(); }, 8000)
+      .catch(() => { prog.model = 0; return download(base + "models/pose_landmarker_lite.task", SIZES.model, n => { prog.model = n; show(); }); });
+    const [, model] = await Promise.all([wasmP, modelP]);
+    onStatus?.("Preparando el modelo de visión…");
     const fileset = await FilesetResolver.forVisionTasks(base + "wasm");
-    const opts = d => ({ baseOptions: { modelAssetPath: base + "models/pose_landmarker_lite.task", delegate: d }, runningMode: "VIDEO", numPoses: 1,
+    const opts = d => ({ baseOptions: { modelAssetBuffer: model, delegate: d }, runningMode: "VIDEO", numPoses: 1,
       minPoseDetectionConfidence: .5, minPosePresenceConfidence: .5, minTrackingConfidence: .5 });
     try { return await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
     catch (e) { console.warn("GPU no disponible, uso CPU", e); return PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
@@ -108,10 +133,11 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
   function frame() {
     if (stopped) return;
     raf = requestAnimationFrame(frame);
-    if (!source || !landmarker) return;
+    if (!source) return;
     if (!isImage && source.readyState < 2) return;
     const W = cv.width, H = cv.height, s = Math.max(W / srcW, H / srcH);
     ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1); ctx.drawImage(source, (W - srcW * s) / 2, (H - srcH * s) / 2, srcW * s, srcH * s); ctx.restore();
+    if (!landmarker) return; // la cámara ya se ve mientras termina de bajar el modelo
     const frameInfo = { W, H, s, dx: (W - srcW * s) / 2, dy: (H - srcH * s) / 2, srcW, srcH };
     const t0 = performance.now(); let res;
     try { res = landmarker.detectForVideo(source, t0); } catch { return; }
@@ -195,8 +221,9 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
     } else gesture.start = 0;
   }
   async function ready() {
+    $(".to-splash").hidden = true;
     if (!landmarker) landmarker = await getLandmarker(status);
-    $(".to-splash").hidden = true; status("Ubícate dentro de la silueta");
+    status("Ubícate dentro de la silueta");
     track("start", { mode: isImage ? "foto" : "camara" });
   }
   async function startCamera() {
@@ -206,6 +233,7 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
       video.srcObject = stream; await video.play();
       srcW = video.videoWidth; srcH = video.videoHeight; source = video; isImage = false; await ready();
     } catch (e) {
+      $(".to-splash").hidden = false;
       $(".to-err").textContent = location.protocol === "file:" ? "El navegador bloquea la cámara al abrir el archivo directo. Ábrelo desde un servidor o desde la web." :
         "No pude abrir la cámara (" + (e.message || e.name) + "). Revisa el permiso de cámara o prueba con una foto.";
     }
@@ -221,7 +249,7 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
     if (act === "start") startCamera();
     if (act === "shot") cv.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `probador-${shop.slug}-${Date.now()}.png`; a.click(); track("photo", { garmentId: current?.g.id }); });
   });
-  $('[data-act="file"]').onchange = e => e.target.files[0] && useFile(e.target.files[0]).catch(err => { $(".to-err").textContent = String(err); });
+  $('[data-act="file"]').onchange = e => e.target.files[0] && useFile(e.target.files[0]).catch(err => { $(".to-splash").hidden = false; $(".to-err").textContent = String(err); });
   const onKey = e => { const i = items.indexOf(current);
     if (e.key === "ArrowRight") select(items[(i + 1) % items.length]);
     if (e.key === "ArrowLeft") select(items[(i - 1 + items.length) % items.length]); };

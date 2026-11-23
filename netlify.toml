@@ -1,3 +1,18 @@
 [build]
   publish = "web"
   command = ""
+
+# Archivos pesados del probador (modelo de visión y motor wasm): que el navegador los guarde una semana
+# y los revalide en segundo plano, para que la segunda visita cargue al instante.
+[[headers]]
+  for = "/probador/wasm/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800, stale-while-revalidate=2592000"
+[[headers]]
+  for = "/probador/models/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800, stale-while-revalidate=2592000"
+[[headers]]
+  for = "/probador/lib/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800, stale-while-revalidate=2592000"
