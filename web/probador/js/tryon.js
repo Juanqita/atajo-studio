@@ -132,7 +132,9 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
   }
   $(".to-cta").onclick = () => track(current.g.link ? "buy" : "whatsapp", { garmentId: current.g.id });
 
-  function resize() { const d = Math.min(devicePixelRatio || 1, 2); const r = root.getBoundingClientRect(); cv.width = Math.max(1, r.width * d); cv.height = Math.max(1, r.height * d); }
+  // Resolución del lienzo: en celular se parte de 1,5x y baja sola si faltan cuadros por segundo
+  let dprCap = matchMedia("(pointer: coarse)").matches ? 1.5 : 2;
+  function resize() { const d = Math.min(devicePixelRatio || 1, dprCap); const r = root.getBoundingClientRect(); cv.width = Math.max(1, r.width * d); cv.height = Math.max(1, r.height * d); }
   const ro = new ResizeObserver(resize); ro.observe(root); resize();
 
   const mapPt = l => { const W = cv.width, H = cv.height, s = Math.max(W / srcW, H / srcH), dx = (W - srcW * s) / 2, dy = (H - srcH * s) / 2;
@@ -200,7 +202,12 @@ export function mountTryon(root, { shop, items, totem = false, track = () => {},
     }
     stats.frames++; if (now - stats.last > 1000) { stats.fps = stats.frames * 1000 / (now - stats.last); stats.frames = 0; stats.last = now; if (locked && !perfSent && stats.fps) { perfSent = true; track("perf", { fps: Math.round(stats.fps) }); }
       // A5: si bajan de 15 cuadros por segundo dos segundos seguidos, se apagan los efectos más caros
-      if (locked && !isImage) { lowFps = stats.fps < 15 ? lowFps + 1 : 0; if (lowFps >= 2 && (fx.occlusion || fx.shadow)) { fx.occlusion = false; fx.shadow = false; console.info("Probador: bajo rendimiento, apago brazos por delante y sombra"); } }
+      if (locked && !isImage) {
+        // Primero se baja la resolución (no se nota en pantalla de celular); si aún va lento, se apagan los efectos caros
+        lowFps = stats.fps < 20 ? lowFps + 1 : 0;
+        if (lowFps >= 2 && dprCap > 1 && Math.min(devicePixelRatio || 1, dprCap) > 1) { dprCap = Math.max(1, dprCap - .25); resize(); lowFps = 0; }
+        else if (lowFps >= 2 && stats.fps < 15 && (fx.occlusion || fx.shadow)) { fx.occlusion = false; fx.shadow = false; console.info("Probador: bajo rendimiento, apago brazos por delante y sombra"); }
+      }
     }
     metaEl.textContent = `${stats.fps.toFixed(0)} fps${fx.occlusion ? "" : " · modo liviano"}`;
   }

@@ -4,6 +4,7 @@ import { mountTryon } from "./tryon.js";
 import { drawGarment, drawPhotoGarment, drawMannequin, drawThumb, thumbBody } from "./engine.js";
 import { loadToCanvas, checkQuality, removeBackground, autoTolerance, guessAnchors, guessSleeves, canvasToBlob, blobToImage } from "./capture.js";
 import { STIFFNESS } from "./filters.js";
+import { fullAnchors } from "./garment.js";
 
 const app = document.getElementById("app");
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -303,9 +304,70 @@ async function editGarment(main, shop, id) {
   main.insertAdjacentHTML("beforeend", `<div class="page-h"><div><h1>Editar prenda</h1></div><a class="btn" href="#/panel/prendas">Volver</a></div>
     <form class="panel form" id="ef" style="max-width:640px">${detailsForm(g)}
       <div class="between"><button type="button" class="btn btn-ghost" id="del" style="color:var(--bad)">Eliminar prenda</button><button class="btn btn-primary" type="submit">Guardar cambios</button></div></form>`);
+  if (g.source === "photo" && g.cutout) {
+    $("#ef").insertAdjacentHTML("afterbegin", `<div class="field"><b>Puntos de la prenda</b><span class="hint">Si una manga se ve cortada o torcida en el probador, revisa hombros, axilas, codos y puños.</span><div><button type="button" class="btn" id="pts">Ajustar puntos</button></div></div>`);
+    $("#pts").onclick = async () => {
+      const img = await blobToImage(g.cutout), A = JSON.parse(JSON.stringify(fullAnchors(img, g.anchors)));
+      const box = document.createElement("div"); main.replaceChildren(box);
+      pointsEditor(box, img, A, { nextLabel: "Guardar puntos", backLabel: "Cancelar",
+        onNext: async () => { g.anchors = A; await db.saveGarment(g); toast("Puntos guardados"); route(); }, onBack: () => route() });
+    };
+  }
   bindStiff($("#ef"));
   $("#ef").onsubmit = async e => { e.preventDefault(); Object.assign(g, readDetails(e.target)); if (g.source === "preset") g.kind = g.kind; await db.saveGarment(g); toast("Cambios guardados"); location.hash = "#/panel/prendas"; };
   $("#del").onclick = async () => { $("#del").textContent = "Toca otra vez para eliminar"; $("#del").onclick = async () => { await db.deleteGarment(g.id); toast("Prenda eliminada"); location.hash = "#/panel/prendas"; }; };
+}
+
+/* Editor de puntos de la prenda (asistente y edición): hombros, ruedo, axilas, codos y puños,
+   con guía sobre la foto y vista previa en dos poses. A se modifica en el lugar. */
+function pointsEditor(root, img, A, { onNext, onBack, nextLabel = "Continuar", backLabel = "Atrás" }) {
+  const IW = img.naturalWidth || img.width, IH = img.naturalHeight || img.height;
+  const SLEEVES = [["long", "Manga larga"], ["short", "Manga corta"], ["none", "Sin manga"]];
+  root.innerHTML = `<section class="panel"><h2>Marca los puntos de la prenda</h2><p style="color:var(--muted)">Ya los ubicamos solos. Revisa que cada uno esté en su lugar y arrástralo si hace falta: <b>hombros</b> en las costuras, <b>ruedo</b> en las esquinas de abajo, <b>axilas</b> donde la manga se une al cuerpo, y <b>codo</b> y <b>puño</b> en el centro de cada manga.</p>
+    <fieldset class="field" style="border:0;padding:0;margin:0 0 12px"><legend style="font-weight:600;margin-bottom:6px">Tipo de manga</legend>
+      <div class="pills" id="sleeve">${SLEEVES.map(([k, t]) => `<label class="pill"><input type="radio" name="sleeve" value="${k}" ${A.sleeve === k ? "checked" : ""}>${t}</label>`).join("")}</div></fieldset>
+    <div class="preview-duo"><div class="anchor-stage" id="st"></div><div class="pose-duo">
+      <figure><canvas id="pv" width="360" height="360" aria-label="Vista previa en maniquí con brazos abajo"></canvas><figcaption>Brazos abajo</figcaption></figure>
+      <figure><canvas id="pv2" width="360" height="360" aria-label="Vista previa en maniquí con brazos en movimiento"></canvas><figcaption>Brazos en movimiento</figcaption></figure>
+      <p class="hint" style="color:var(--muted)">Así se va a ver en el probador. Si una manga se ve cortada o torcida, mueve su axila, codo o puño.</p></div></div>
+    <div class="row"><button class="btn btn-primary" id="next">${nextLabel}</button><button class="btn btn-ghost" id="back">${backLabel}</button></div></section>`;
+  const st = $("#st", root), c = document.createElement("canvas"); c.width = IW; c.height = IH;
+  const cx = c.getContext("2d"); st.append(c);
+  st.style.background = "repeating-conic-gradient(#EEE8DC 0 25%,#F7F3EC 0 50%) 0 0/20px 20px"; st.style.borderRadius = "12px";
+  const pv = [$("#pv", root), $("#pv2", root)];
+  // Guía sobre la foto: costuras (hombro → axila → ruedo) y eje de cada manga (axila → codo → puño)
+  const guide = () => {
+    cx.clearRect(0, 0, c.width, c.height); cx.drawImage(img, 0, 0);
+    const lw = Math.max(2, c.width / 260); cx.lineWidth = lw; cx.setLineDash([lw * 3, lw * 2]); cx.lineCap = "round";
+    const path = (pts, col) => { cx.strokeStyle = col; cx.beginPath(); pts.forEach((p, i) => i ? cx.lineTo(p.x, p.y) : cx.moveTo(p.x, p.y)); cx.stroke(); };
+    if (A.sleeve !== "none") { path([A.sL, A.aL, A.hL], "#F08A12cc"); path([A.sR, A.aR, A.hR], "#F08A12cc"); }
+    if (A.sleeve === "long") for (const [s, a, e, k] of [[A.sL, A.aL, A.eL, A.cL], [A.sR, A.aR, A.eR, A.cR]]) path([{ x: (s.x + a.x) / 2, y: (s.y + a.y) / 2 }, e, k], "#2E6FD8cc");
+    cx.setLineDash([]);
+  };
+  let queued = false;
+  const draw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; guide();
+    ["down", "bent"].forEach((pose, i) => { const x = pv[i].getContext("2d"), B = thumbBody(360, pose); x.clearRect(0, 0, 360, 360); drawMannequin(x, 360, B); drawPhotoGarment(x, B, img, A, { kind: "shirt" }); }); }); };
+  const labels = { sL: "Hombro", sR: "Hombro", hL: "Ruedo", hR: "Ruedo", aL: "Axila", aR: "Axila", eL: "Codo", eR: "Codo", cL: "Puño", cR: "Puño" };
+  const handles = {};
+  for (const k of Object.keys(labels)) {
+    const h = document.createElement("button"); h.type = "button"; h.className = "handle " + ({ h: "hem", a: "pit", e: "elbow", c: "cuff" }[k[0]] || "");
+    h.setAttribute("aria-label", labels[k] + (k[1] === "L" ? " izquierdo" : " derecho") + ", usa las flechas para mover");
+    h.innerHTML = `<span>${labels[k]}</span>`; st.append(h); handles[k] = h;
+    const place = () => { h.style.left = (A[k].x / c.width * 100) + "%"; h.style.top = (A[k].y / c.height * 100) + "%"; };
+    h.place = place; place();
+    h.onpointerdown = e => { h.setPointerCapture(e.pointerId); h.style.cursor = "grabbing"; };
+    h.onpointermove = e => { if (!h.hasPointerCapture(e.pointerId)) return; const r = c.getBoundingClientRect();
+      A[k] = { x: Math.max(0, Math.min(c.width, (e.clientX - r.left) / r.width * c.width)), y: Math.max(0, Math.min(c.height, (e.clientY - r.top) / r.height * c.height)) }; place(); draw(); };
+    h.onpointerup = () => { h.style.cursor = ""; };
+    h.onkeydown = e => { const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!d) return; e.preventDefault();
+      const step = c.width / 100; A[k] = { x: A[k].x + d[0] * step, y: A[k].y + d[1] * step }; place(); draw(); };
+  }
+  // Sin manga o manga corta: se ocultan codo y puño (el largo de la manga corta se toma de la foto)
+  const showSleeve = () => { for (const k of ["eL", "eR", "cL", "cR"]) handles[k].hidden = A.sleeve !== "long"; for (const k of ["aL", "aR"]) handles[k].hidden = false; };
+  $("#sleeve", root).onchange = e => { A.sleeve = e.target.value; showSleeve(); draw(); };
+  showSleeve(); draw();
+  $("#back", root).onclick = onBack;
+  $("#next", root).onclick = onNext;
 }
 
 /* ---------------- Asistente de captura ---------------- */
@@ -401,55 +463,7 @@ async function newGarment(main, shop) {
     $("#next", wz).onclick = () => { S.anchors = guessSleeves(S.cut, guessAnchors(S.cut)); go(3); };
     setTimeout(render, 30);
   }
-  function points() {
-    const SLEEVES = [["long", "Manga larga"], ["short", "Manga corta"], ["none", "Sin manga"]];
-    wz.innerHTML = `<section class="panel"><h2>Marca los puntos de la prenda</h2><p style="color:var(--muted)">Ya los ubicamos solos. Revisa que cada uno esté en su lugar y arrástralo si hace falta: <b>hombros</b> en las costuras, <b>ruedo</b> en las esquinas de abajo, <b>axilas</b> donde la manga se une al cuerpo, y <b>codo</b> y <b>puño</b> en el centro de cada manga.</p>
-      <fieldset class="field" style="border:0;padding:0;margin:0 0 12px"><legend style="font-weight:600;margin-bottom:6px">Tipo de manga</legend>
-        <div class="pills" id="sleeve">${SLEEVES.map(([k, t]) => `<label class="pill"><input type="radio" name="sleeve" value="${k}" ${S.anchors.sleeve === k ? "checked" : ""}>${t}</label>`).join("")}</div></fieldset>
-      <div class="preview-duo"><div class="anchor-stage" id="st"></div><div class="pose-duo">
-        <figure><canvas id="pv" width="360" height="360" aria-label="Vista previa en maniquí con brazos abajo"></canvas><figcaption>Brazos abajo</figcaption></figure>
-        <figure><canvas id="pv2" width="360" height="360" aria-label="Vista previa en maniquí con brazos en movimiento"></canvas><figcaption>Brazos en movimiento</figcaption></figure>
-        <p class="hint" style="color:var(--muted)">Así se va a ver en el probador. Si una manga se ve cortada o torcida, mueve su axila, codo o puño.</p></div></div>
-      <div class="row"><button class="btn btn-primary" id="next">Continuar</button><button class="btn btn-ghost" id="back">Atrás</button></div></section>`;
-    const st = $("#st", wz), c = document.createElement("canvas"); c.width = S.cut.width; c.height = S.cut.height;
-    const cx = c.getContext("2d"); st.append(c);
-    st.style.background = "repeating-conic-gradient(#EEE8DC 0 25%,#F7F3EC 0 50%) 0 0/20px 20px"; st.style.borderRadius = "12px";
-    const pv = [$("#pv", wz), $("#pv2", wz)];
-    const A = S.anchors;
-    // Guía sobre la foto: costuras (hombro → axila → ruedo) y eje de cada manga (axila → codo → puño)
-    const guide = () => {
-      cx.clearRect(0, 0, c.width, c.height); cx.drawImage(S.cut, 0, 0);
-      const lw = Math.max(2, c.width / 260); cx.lineWidth = lw; cx.setLineDash([lw * 3, lw * 2]); cx.lineCap = "round";
-      const path = (pts, col) => { cx.strokeStyle = col; cx.beginPath(); pts.forEach((p, i) => i ? cx.lineTo(p.x, p.y) : cx.moveTo(p.x, p.y)); cx.stroke(); };
-      if (A.sleeve !== "none") { path([A.sL, A.aL, A.hL], "#F08A12cc"); path([A.sR, A.aR, A.hR], "#F08A12cc"); }
-      if (A.sleeve === "long") for (const [s, a, e, k] of [[A.sL, A.aL, A.eL, A.cL], [A.sR, A.aR, A.eR, A.cR]]) path([{ x: (s.x + a.x) / 2, y: (s.y + a.y) / 2 }, e, k], "#2E6FD8cc");
-      cx.setLineDash([]);
-    };
-    let queued = false;
-    const draw = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; guide();
-      ["down", "bent"].forEach((pose, i) => { const x = pv[i].getContext("2d"), B = thumbBody(360, pose); x.clearRect(0, 0, 360, 360); drawMannequin(x, 360, B); drawPhotoGarment(x, B, S.cut, A, { kind: "shirt" }); }); }); };
-    const labels = { sL: "Hombro", sR: "Hombro", hL: "Ruedo", hR: "Ruedo", aL: "Axila", aR: "Axila", eL: "Codo", eR: "Codo", cL: "Puño", cR: "Puño" };
-    const handles = {};
-    for (const k of Object.keys(labels)) {
-      const h = document.createElement("button"); h.type = "button"; h.className = "handle " + ({ h: "hem", a: "pit", e: "elbow", c: "cuff" }[k[0]] || "");
-      h.setAttribute("aria-label", labels[k] + (k[1] === "L" ? " izquierdo" : " derecho") + ", usa las flechas para mover");
-      h.innerHTML = `<span>${labels[k]}</span>`; st.append(h); handles[k] = h;
-      const place = () => { h.style.left = (A[k].x / c.width * 100) + "%"; h.style.top = (A[k].y / c.height * 100) + "%"; };
-      h.place = place; place();
-      h.onpointerdown = e => { h.setPointerCapture(e.pointerId); h.style.cursor = "grabbing"; };
-      h.onpointermove = e => { if (!h.hasPointerCapture(e.pointerId)) return; const r = c.getBoundingClientRect();
-        A[k] = { x: Math.max(0, Math.min(c.width, (e.clientX - r.left) / r.width * c.width)), y: Math.max(0, Math.min(c.height, (e.clientY - r.top) / r.height * c.height)) }; place(); draw(); };
-      h.onpointerup = () => { h.style.cursor = ""; };
-      h.onkeydown = e => { const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!d) return; e.preventDefault();
-        const step = c.width / 100; A[k] = { x: A[k].x + d[0] * step, y: A[k].y + d[1] * step }; place(); draw(); };
-    }
-    // Sin manga o manga corta: se ocultan codo y puño (el largo de la manga corta se toma de la foto)
-    const showSleeve = () => { for (const k of ["eL", "eR", "cL", "cR"]) handles[k].hidden = A.sleeve !== "long"; for (const k of ["aL", "aR"]) handles[k].hidden = false; };
-    $("#sleeve", wz).onchange = e => { A.sleeve = e.target.value; showSleeve(); draw(); };
-    showSleeve(); draw();
-    $("#back", wz).onclick = () => go(2);
-    $("#next", wz).onclick = () => go(4);
-  }
+  function points() { pointsEditor(wz, S.cut, S.anchors, { onNext: () => go(4), onBack: () => go(2) }); }
   function details() {
     wz.innerHTML = `<form class="panel form" id="df" style="max-width:720px"><h2>Datos de la prenda</h2>${detailsForm()}
       <label class="pill" style="justify-content:flex-start;opacity:.6"><input type="checkbox" disabled>Generar también el modelo 3D (visor 360° y realidad aumentada) <span class="soon">Próximamente</span></label>

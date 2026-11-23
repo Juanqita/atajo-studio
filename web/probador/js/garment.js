@@ -17,7 +17,7 @@ const perp = a => ({ x: -a.y, y: a.x }), dot = (a, b) => a.x * b.x + a.y * b.y;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 
-const TORSO_COLS = 6, TORSO_ROWS = 8, SLEEVE_ROWS_UP = 5, SLEEVE_ROWS_FORE = 5;
+const TORSO_COLS = 6, TORSO_ROWS = 8, SLEEVE_ROWS_UP = 7, SLEEVE_ROWS_FORE = 7;
 export const PIECE = { torso: 1, left: 2, right: 3 };
 
 /* ---------------- Preparación del activo ---------------- */
@@ -156,9 +156,12 @@ export class PhotoRig {
     const fx = sg => sg > 1 ? 1 + (sg - 1) * dA : sg < -1 ? -1 + (sg + 1) * dB : (Math.sin(sg * AH + off) - mid) / half;
     const shadeAt = sg => { const a = clamp(sg, -1.3, 1.3) * AH + off; return .78 + .22 * Math.cos(a * .9); };
     const imgW = t => len(sub(lerp(A.sR, A.hR, t), lerp(A.sL, A.hL, t)));
+    // Las caderas de MediaPipe son articulaciones: el cuerpo mide ~1,7 veces esa distancia. La prenda no queda más angosta.
+    const widen = B.visHips ? clamp(len(sub(B.h23, B.h24)) * 1.7 * 1.04 / Math.max(1, imgW(1) * k * cosY), 1, 1.35) : 1;
     const rigid = (s, t) => {
       const c = center(t), u = norm(lerp(uS, uH, clamp(t, 0, 1)));
-      const hw = imgW(t) * k * cosY / 2;
+      let hw = imgW(t) * k * cosY / 2;
+      if (widen > 1 && t > 0) hw *= 1 + (widen - 1) * Math.min(1, t) ** 1.5; // cuerpo más ancho que la prenda en la cadera
       // el centro de la fila en la foto puede no estar en s=.5 si el ruedo está corrido
       return add(c, mul(u, hw * fx((s - .5) * 2)));
     };
@@ -208,17 +211,26 @@ export class PhotoRig {
     const rows = [];
     const build = (pts, edgeA, edgeB, wk, sideRef) => {
       const out = [], n = nUp + nFore;
+      const d1 = norm(sub(pts[1], pts[0])), d2 = norm(sub(pts[2], pts[1]));
+      const L1 = len(sub(pts[1], pts[0])), L2 = len(sub(pts[2], pts[1]));
+      // Codo redondeado: cerca del codo el eje sigue una curva (Bézier) en vez de un quiebre,
+      // así la manga no hace pico cuando el brazo se dobla mucho.
+      const R = Math.min(widths[1] * wk * .6, L1 * .35, L2 * .35);
+      const A0 = sub(pts[1], mul(d1, R)), B0 = add(pts[1], mul(d2, R));
+      const corner = t => ({ p: add(add(mul(A0, (1 - t) * (1 - t)), mul(pts[1], 2 * (1 - t) * t)), mul(B0, t * t)),
+        d: norm(add(mul(sub(pts[1], A0), 2 * (1 - t)), mul(sub(B0, pts[1]), 2 * t))) });
+      let prevN = null;
       for (let r = 0; r <= n + 1; r++) {
         const up = r <= nUp, f = r > n ? 1 + .08 : up ? r / nUp : (r - nUp) / nFore;
-        const p0 = up ? pts[0] : pts[1], p1 = up ? pts[1] : pts[2];
-        const c = r > n ? add(pts[2], mul(sub(pts[2], pts[1]), .08)) : lerp(p0, p1, Math.min(1, f));
-        const d1 = norm(sub(pts[1], pts[0])), d2 = norm(sub(pts[2], pts[1]));
-        let d, wid;
-        if (up) { d = r === nUp ? norm(add(d1, d2)) : d1; wid = widths[0] + (widths[1] - widths[0]) * f; }
-        else { d = d2; wid = widths[1] + (widths[2] - widths[1]) * Math.min(1, f); }
-        let n2 = perp(d); if (dot(n2, sub(sideRef, pts[0])) < 0) n2 = mul(n2, -1);
-        let hw = wid * wk / 2;
-        if (r === nUp) hw /= Math.max(.87, Math.cos(Math.acos(clamp(dot(d1, d2), -1, 1)) / 2)); // codo: ensancha poco para no hacer picos
+        let c, d, wid;
+        if (up) { c = lerp(pts[0], pts[1], f); d = d1; wid = widths[0] + (widths[1] - widths[0]) * f; }
+        else { c = r > n ? add(pts[2], mul(d2, L2 * .08)) : lerp(pts[1], pts[2], f); d = d2; wid = widths[1] + (widths[2] - widths[1]) * Math.min(1, f); }
+        const dd = up ? (1 - f) * L1 : f * L2; // distancia al codo
+        if (R > 1 && dd < R && r <= n) { const q = corner(up ? .5 - dd / (2 * R) : .5 + dd / (2 * R)); c = q.p; d = q.d; }
+        let n2 = perp(d);
+        if (prevN ? dot(n2, prevN) < 0 : dot(n2, sub(sideRef, pts[0])) < 0) n2 = mul(n2, -1);
+        prevN = n2;
+        const hw = wid * wk / 2;
         let e1 = add(c, mul(n2, hw)), e2 = add(c, mul(n2, -hw));
         // cerca de la raíz, la sección se alinea con la costura hombro-axila
         if (up) { const bl = 1 - smooth(f * 2.5); const ext = .12; const ra = add(edgeA, mul(sub(edgeA, edgeB), ext)), rb = add(edgeB, mul(sub(edgeB, edgeA), ext));
@@ -228,7 +240,19 @@ export class PhotoRig {
       return out;
     };
     const src = build(srcPts, S.s, S.a, 1, S.s);
-    const dst = build(dstPts, Ds, Da, k, Ds);
+    // Brazo levantado: la sisa se gira hacia la dirección del brazo para que la raíz no se cruce
+    // (el torso se dibuja encima y tapa la unión con la axila).
+    const armDir = norm(sub(be, Droot)), down = norm(sub(map(.5, 1), map(.5, 0)));
+    const wRaise = smooth((.45 - dot(armDir, down)) / 1.1);
+    let Es = Ds, Ea = Da;
+    if (wRaise > 0) {
+      let nn = perp(armDir); if (dot(nn, sub(Ds, Da)) < 0) nn = mul(nn, -1);
+      const hw0 = S.rootW * k / 2;
+      const c0 = lerp(Droot, bs, wRaise * .8); // la raíz sube hacia el hombro real
+      Es = lerp(Ds, add(c0, mul(nn, hw0)), wRaise); Ea = lerp(Da, add(c0, mul(nn, -hw0)), wRaise);
+      dstPts = [lerp(Es, Ea, .5), ...dstPts.slice(1)];
+    }
+    const dst = build(dstPts, Es, Ea, k, Es);
     // Las filas de la raíz se extienden un poco hacia el torso para que no quede costura abierta
     const pos = [], uv = [], shade = [];
     for (let r = 0; r < src.length; r++) for (let i = 0; i < 3; i++) { pos.push(dst[r][i]); uv.push(src[r][i]); shade.push(i === 1 ? 1 : .8); }
