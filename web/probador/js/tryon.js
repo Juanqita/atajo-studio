@@ -9,6 +9,7 @@ let landmarkerP = null;
 /* Modelo de pose: primero desde el almacenamiento de Google (rápido y en caché en muchos equipos),
    y si falla o tarda, desde esta misma web. Se muestra el avance de la descarga. */
 const MODEL_CDN = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+const WASM_CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"; // misma versión que lib/vision_bundle.mjs
 const SIZES = { wasm: 9.0e6, model: 5.6e6 }; // tamaño ya descomprimido, para el porcentaje
 async function download(url, expect, onBytes, timeoutMs = 0) {
   const ctl = new AbortController(); let timer = timeoutMs ? setTimeout(() => ctl.abort(), timeoutMs) : 0;
@@ -32,16 +33,23 @@ function getLandmarker(onStatus) {
     show();
     const { PoseLandmarker, FilesetResolver } = await import("../lib/vision_bundle.mjs");
     // El motor (wasm) se baja con avance; el cargador de MediaPipe lo vuelve a pedir y sale de la caché
-    const wasmP = download(base + "wasm/vision_wasm_internal.wasm", SIZES.wasm, n => { prog.wasm = n; show(); }).catch(() => null);
+    let wasmBase = WASM_CDN;
+    const wasmP = download(WASM_CDN + "/vision_wasm_internal.wasm", SIZES.wasm, n => { prog.wasm = n; show(); }, 8000)
+      .catch(() => { wasmBase = base + "wasm"; prog.wasm = 0; return download(wasmBase + "/vision_wasm_internal.wasm", SIZES.wasm, n => { prog.wasm = n; show(); }).catch(() => null); });
     const modelP = download(MODEL_CDN, SIZES.model, n => { prog.model = n; show(); }, 8000)
       .catch(() => { prog.model = 0; return download(base + "models/pose_landmarker_lite.task", SIZES.model, n => { prog.model = n; show(); }); });
     const [, model] = await Promise.all([wasmP, modelP]);
     onStatus?.("Preparando el modelo de visión…");
-    const fileset = await FilesetResolver.forVisionTasks(base + "wasm");
+    let fileset = await FilesetResolver.forVisionTasks(wasmBase);
+    const build = (fs, d) => PoseLandmarker.createFromOptions(fs, opts(d));
     const opts = d => ({ baseOptions: { modelAssetBuffer: model, delegate: d }, runningMode: "VIDEO", numPoses: 1,
       minPoseDetectionConfidence: .5, minPosePresenceConfidence: .5, minTrackingConfidence: .5 });
-    try { return await PoseLandmarker.createFromOptions(fileset, opts("GPU")); }
-    catch (e) { console.warn("GPU no disponible, uso CPU", e); return PoseLandmarker.createFromOptions(fileset, opts("CPU")); }
+    try { return await build(fileset, "GPU"); }
+    catch (e) {
+      console.warn("GPU no disponible o falló el motor de la CDN, reintento", e);
+      if (wasmBase !== base + "wasm") { try { return await build(fileset, "CPU"); } catch { fileset = await FilesetResolver.forVisionTasks(base + "wasm"); } }
+      return build(fileset, "CPU");
+    }
   })();
   landmarkerP.catch(() => { landmarkerP = null; });
   return landmarkerP;
